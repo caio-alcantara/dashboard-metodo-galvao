@@ -70,11 +70,16 @@ import matplotlib.pyplot as plt
 with tab2:
     st.header("Análise de Anomalias com Isolation Forest")
 
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.image("arvore.png", width=200)
+
     st.write("""
     Esta ferramenta usa o modelo **Isolation Forest** para detectar anomalias nos dados de consumo de gás. 
     Faça o upload do arquivo CSV disponibilizado após executar o notebook do projeto (df_sample_selecionado.csv).
     """)
-
+    
+    
     # Carregar o modelo de anomalias
     iso_forest_model = load_anomaly_model()
 
