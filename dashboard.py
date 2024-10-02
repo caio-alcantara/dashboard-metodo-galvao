@@ -178,30 +178,30 @@ with tab3:
     #uploaded_file = st.file_uploader("Carregar arquivo CSV", type="csv", key="previsao")
     uploaded_file = True
     if uploaded_file is not None:
-        #df_200_instalacoes = pd.read_csv(uploaded_file)
-        df_200_instalacoes = pd.read_csv('df_200_instalacoes.csv')
+        #df_50_instalacoes = pd.read_csv(uploaded_file)
+        df_50_instalacoes = pd.read_csv('df_50_instalacoes.csv')
         
         # Encodificação do clientCode
         label_encoder = LabelEncoder()
-        df_200_instalacoes['clientCode_encoded'] = label_encoder.fit_transform(df_200_instalacoes['clientCode'])
+        df_50_instalacoes['clientCode_encoded'] = label_encoder.fit_transform(df_50_instalacoes['clientCode'])
         
         # Reordenar as colunas para que 'clientCode_encoded' seja a primeira
-        cols = ['clientCode_encoded'] + [col for col in df_200_instalacoes.columns if col != 'clientCode_encoded']
-        df_200_instalacoes = df_200_instalacoes[cols]
+        cols = ['clientCode_encoded'] + [col for col in df_50_instalacoes.columns if col != 'clientCode_encoded']
+        df_50_instalacoes = df_50_instalacoes[cols]
         
         st.write("Visualização dos primeiros 3 dados carregados:")
-        st.dataframe(df_200_instalacoes.head(3))
+        st.dataframe(df_50_instalacoes.head(3))
         
         ## Selecionar um clientCode
-        client_code = st.selectbox("Selecione o clientCode:", df_200_instalacoes['clientCode_encoded'].unique())
+        client_code = st.selectbox("Selecione o clientCode:", df_50_instalacoes['clientCode_encoded'].unique())
 
         ## Identificar os clientIndices associados ao client
-        client_indices = df_200_instalacoes[df_200_instalacoes['clientCode_encoded'] == client_code]['clientIndex'].unique()
+        client_indices = df_50_instalacoes[df_50_instalacoes['clientCode_encoded'] == client_code]['clientIndex'].unique()
 
         ## Selecionar um clientIndex baseado no clientCode
         client_index = st.selectbox("Selecione o clientIndex:", client_indices)
         
-        instalacao_df = df_200_instalacoes[(df_200_instalacoes['clientCode_encoded'] == client_code) & (df_200_instalacoes['clientIndex'] == client_index)].copy()
+        instalacao_df = df_50_instalacoes[(df_50_instalacoes['clientCode_encoded'] == client_code) & (df_50_instalacoes['clientIndex'] == client_index)].copy()
         
         # Agrupar os dados por instalação e por mês, somando o consumo diário
         instalacao_mensal_df = instalacao_df.groupby('ano_mes')['consumo_dia'].sum().reset_index()
