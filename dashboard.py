@@ -7,6 +7,7 @@ import seaborn as sns
 import plotly.express as px
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 
 # Função para carregar o modelo de anomalias
@@ -179,19 +180,28 @@ with tab3:
     if uploaded_file is not None:
         #df_200_instalacoes = pd.read_csv(uploaded_file)
         df_200_instalacoes = pd.read_csv('df_200_instalacoes.csv')
+        
+        # Encodificação do clientCode
+        label_encoder = LabelEncoder()
+        df_200_instalacoes['clientCode_encoded'] = label_encoder.fit_transform(df_200_instalacoes['clientCode'])
+        
+        # Reordenar as colunas para que 'clientCode_encoded' seja a primeira
+        cols = ['clientCode_encoded'] + [col for col in df_200_instalacoes.columns if col != 'clientCode_encoded']
+        df_200_instalacoes = df_200_instalacoes[cols]
+        
         st.write("Visualização dos primeiros 3 dados carregados:")
         st.dataframe(df_200_instalacoes.head(3))
         
         ## Selecionar um clientCode
-        client_code = st.selectbox("Selecione o clientCode:", df_200_instalacoes['clientCode'].unique())
+        client_code = st.selectbox("Selecione o clientCode:", df_200_instalacoes['clientCode_encoded'].unique())
 
         ## Identificar os clientIndices associados ao client
-        client_indices = df_200_instalacoes[df_200_instalacoes['clientCode'] == client_code]['clientIndex'].unique()
+        client_indices = df_200_instalacoes[df_200_instalacoes['clientCode_encoded'] == client_code]['clientIndex'].unique()
 
         ## Selecionar um clientIndex baseado no clientCode
         client_index = st.selectbox("Selecione o clientIndex:", client_indices)
         
-        instalacao_df = df_200_instalacoes[(df_200_instalacoes['clientCode'] == client_code) & (df_200_instalacoes['clientIndex'] == client_index)].copy()
+        instalacao_df = df_200_instalacoes[(df_200_instalacoes['clientCode_encoded'] == client_code) & (df_200_instalacoes['clientIndex'] == client_index)].copy()
         
         # Agrupar os dados por instalação e por mês, somando o consumo diário
         instalacao_mensal_df = instalacao_df.groupby('ano_mes')['consumo_dia'].sum().reset_index()
@@ -199,7 +209,6 @@ with tab3:
         # Garantir que o índice seja o ano e mês
         instalacao_mensal_df.set_index('ano_mes', inplace=True)
 
-        st.subheader("Consumo Mensal Real por Ano/Mês")
         fig_consumo_real = px.line(
             instalacao_mensal_df.reset_index(), 
             x='ano_mes', 
@@ -209,6 +218,65 @@ with tab3:
         )
 
         st.plotly_chart(fig_consumo_real)
+        
+        # Gráfico de Média Móvel de 7 e 30 dias
+        fig_media_movel = px.line(
+            instalacao_df,
+            x='data_hora',
+            y=['media_movel_7_dias', 'media_movel_30_dias'],
+            title='Média Móvel de 7 e 30 dias',
+            labels={'data_hora': 'Data', 'value': 'Consumo Médio (m³)'},
+        )
+
+        st.plotly_chart(fig_media_movel)
+                
+        # Gráfico de Variação Percentual
+        fig_mudanca_percentual = px.line(
+            instalacao_df,
+            x='data_hora',
+            y='mudanca_percentual',
+            title='Mudança Percentual no Consumo Diário',
+            labels={'data_hora': 'Data', 'mudanca_percentual': 'Mudança Percentual (%)'},
+        )
+
+        st.plotly_chart(fig_mudanca_percentual)
+        
+        # Gráfico de Barras da Média de Consumo Mensal por Estação do Ano
+        media_consumo_estacao = instalacao_df.groupby('estacao')['consumo_dia'].mean().reset_index()
+
+        # Ordenar as estações por consumo médio em ordem crescente
+        media_consumo_estacao = media_consumo_estacao.sort_values(by='consumo_dia')
+
+        # Identificar a estação com maior consumo
+        max_consumo_estacao = media_consumo_estacao.loc[media_consumo_estacao['consumo_dia'].idxmax()]
+
+        fig_media_estacao = px.bar(
+            media_consumo_estacao,
+            x='estacao',
+            y='consumo_dia',
+            title='Média de Consumo Diário Para Cada Estação do Ano (Maior Consumo em Vermelho)',
+            labels={'estacao': 'Estação do Ano', 'consumo_dia': 'Média de Consumo Diário (m³)'},
+        )
+
+        # Destacar a barra com maior consumo em vermelho
+        fig_media_estacao.update_traces(marker_color=['red' if estacao == max_consumo_estacao['estacao'] else 'blue' for estacao in media_consumo_estacao['estacao']])
+
+        st.plotly_chart(fig_media_estacao)
+        
+        # Histograma do Consumo Diário
+        fig_hist_consumo = px.histogram(
+            instalacao_df,
+            x='consumo_dia',
+            title='Distribuição do Consumo Diário (m³)',
+            labels={'consumo_dia': 'Consumo Diário (m³)'},
+            nbins=100
+        )
+
+        st.plotly_chart(fig_hist_consumo)
+
+        ##### Previsão de Consumo com Holt-Winters #####
+        st.header("Previsão de Consumo com Holt-Winters")
+        st.write('Aguarde enquanto o modelo Holt-Winters é ajustado e a previsão é feita...')
 
         # Parâmetros a serem testados
         trend_options = ['add', 'mul', None]
@@ -226,7 +294,7 @@ with tab3:
         train_size = int(len(instalacao_mensal_df) * 0.8)
         train, test = instalacao_mensal_df.iloc[:train_size], instalacao_mensal_df.iloc[train_size:]
         
-        st.spinner("Treinando o modelo Holt-Winters para encontrar os melhores parâmetros...")
+        
         
         for trend in trend_options:
             for seasonal in seasonal_options:
@@ -305,6 +373,9 @@ with tab3:
 
         st.write("Tabela de Previsão de Consumo:")
         st.dataframe(previsao_df)
+        # Calcular o somatório das previsões
+        soma_previsoes = previsao_mensal.sum()
+        st.write(f"Somatório das previsões de consumo para o(s) próximo(s) {months_to_predict} mes(es): {soma_previsoes:.2f} m³")
 
         df_grafico = pd.concat([
             instalacao_mensal_df.reset_index(),  # Dados reais
