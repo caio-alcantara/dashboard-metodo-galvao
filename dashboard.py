@@ -2,7 +2,12 @@ import streamlit as st
 import pandas as pd
 import joblib
 from sklearn.preprocessing import StandardScaler
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import seaborn as sns
+import plotly.express as px
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+import matplotlib.pyplot as plt
 
 # Função para carregar o modelo de anomalias
 @st.cache_resource
@@ -29,7 +34,7 @@ st.markdown("<h1 style='text-align: left;'><span style='color: #c9a487;'>Método
 st.markdown("### Utilize as abas abaixo para conhecer os objetivos da dashboard, analisar anomalias ou fazer predições de consumo.")
 
 # Definindo abas
-tab1, tab2, tab3 = st.tabs(["Apresentação", "Detecção de Anomalias", "Predição de Consumo"])
+tab1, tab2, tab3 = st.tabs(["Apresentação", "Detecção de Anomalias", "Previsão de Consumo"])
 
 # Adicionando estilo CSS para centralizar as abas
 st.markdown("""
@@ -63,8 +68,6 @@ with tab1:
     A equipe é composta por Caio de Alcantara Santos, Cecília Beatriz Melo Galvão, Pablo de Azevedo, Lucas Cozzolino Tort, Nataly de Souza Cunha, Kethlen Martins da Silva, Mariella Sayumi Mercado Kamezawa.
     """)
 
-# Aba 2: Detecção de Anomalias
-import matplotlib.pyplot as plt
 
 # Aba 2: Detecção de Anomalias
 with tab2:
@@ -156,9 +159,185 @@ with tab2:
 
 # Aba 3: Predição de Consumo de um Cliente (Somente Visual)
 with tab3:
-    st.header("Predição de Consumo de Gás para um Cliente (Em Breve)")
+    st.header("Predição de Consumo de Gás para um Cliente utilizando Holt-Winters")
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.image("grafico.png", width=200)
+    
     st.write("""
-    Esta seção será usada no futuro para prever o consumo de gás de um cliente com base em características específicas.
+    Esta ferramenta usa o modelo **Holt-Winters** para prever o consumo de um cliente presente nos dados sintéticos.
+    O modelo Holt-Winters utiliza equações estatísticas para realizar a previsão de séries temporais, levando em consideração
+    a sazonalidade e tendência dos dados. 
+    Aqui, você poderá escolher uma instalação única (clientCode e clientIndex) e visualizar a previsão de consumo de gás para essa instalação.
+    **Para este exemplo, não será necessário realizar upload de dados. Você poderá utilizar os dados 
+    de amostra que disponibilizamos já internamente na dashboard.**
     """)
     
-    uploaded_file = st.file_uploader("Carregar arquivo CSV", type="csv", key="previsao")
+    #uploaded_file = st.file_uploader("Carregar arquivo CSV", type="csv", key="previsao")
+    uploaded_file = True
+    if uploaded_file is not None:
+        #df_200_instalacoes = pd.read_csv(uploaded_file)
+        df_200_instalacoes = pd.read_csv('df_200_instalacoes.csv')
+        st.write("Visualização dos primeiros 3 dados carregados:")
+        st.dataframe(df_200_instalacoes.head(3))
+        
+        ## Selecionar um clientCode
+        client_code = st.selectbox("Selecione o clientCode:", df_200_instalacoes['clientCode'].unique())
+
+        ## Identificar os clientIndices associados ao client
+        client_indices = df_200_instalacoes[df_200_instalacoes['clientCode'] == client_code]['clientIndex'].unique()
+
+        ## Selecionar um clientIndex baseado no clientCode
+        client_index = st.selectbox("Selecione o clientIndex:", client_indices)
+        
+        instalacao_df = df_200_instalacoes[(df_200_instalacoes['clientCode'] == client_code) & (df_200_instalacoes['clientIndex'] == client_index)].copy()
+        
+        # Agrupar os dados por instalação e por mês, somando o consumo diário
+        instalacao_mensal_df = instalacao_df.groupby('ano_mes')['consumo_dia'].sum().reset_index()
+
+        # Garantir que o índice seja o ano e mês
+        instalacao_mensal_df.set_index('ano_mes', inplace=True)
+
+        st.subheader("Consumo Mensal Real por Ano/Mês")
+        fig_consumo_real = px.line(
+            instalacao_mensal_df.reset_index(), 
+            x='ano_mes', 
+            y='consumo_dia', 
+            title='Consumo Mensal Real (m³) por Ano/Mês',
+            labels={'ano_mes': 'Ano/Mês', 'consumo_dia': 'Consumo Diário (m³)'},
+        )
+
+        st.plotly_chart(fig_consumo_real)
+
+        # Parâmetros a serem testados
+        trend_options = ['add', 'mul', None]
+        seasonal_options = ['add', 'mul', None]
+        seasonal_periods = [i for i in range(2, 31)]  
+        damped_trend_options = [True, False]
+
+        
+        # Variáveis para armazenar os melhores resultados
+        best_mae = np.inf
+        best_mse = np.inf
+        best_mape = np.inf
+        best_params = {}
+        
+        train_size = int(len(instalacao_mensal_df) * 0.8)
+        train, test = instalacao_mensal_df.iloc[:train_size], instalacao_mensal_df.iloc[train_size:]
+        
+        st.spinner("Treinando o modelo Holt-Winters para encontrar os melhores parâmetros...")
+        
+        for trend in trend_options:
+            for seasonal in seasonal_options:
+                for period in seasonal_periods:
+                    for damped in damped_trend_options:
+                        try:
+                            ## Apenas testar damped_trend se houver uma tendência
+                            if trend is None and damped:
+                                continue
+                            
+                            ## Definir e ajustar o modelo Holt-Winters com os dados de treino
+                            modelo_treino = ExponentialSmoothing(
+                                train['consumo_dia'], 
+                                trend=trend, 
+                                seasonal=seasonal,
+                                seasonal_periods=period,
+                                damped_trend=damped
+                            )
+
+                            ajuste_treino = modelo_treino.fit()
+
+                            ## Fazer a previsão para o número de meses no conjunto de teste
+                            previsao_teste = ajuste_treino.forecast(len(test))
+
+                            ## Calcular as métricas
+                            mae = mean_absolute_error(test['consumo_dia'], previsao_teste)
+                            mse = mean_squared_error(test['consumo_dia'], previsao_teste)
+                            mape = mean_absolute_percentage_error(test['consumo_dia'], previsao_teste)
+
+                            ## Comparar o erro e armazenar o melhor modelo (baseado no MAE)
+                            if mae < best_mae:
+                                best_mae = mae
+                                best_mse = mse
+                                best_mape = mape
+                                best_params = {
+                                    'trend': trend,
+                                    'seasonal': seasonal,
+                                    'seasonal_periods': period,
+                                    'damped_trend': damped
+                                }
+
+                        except Exception as e:
+                            print(f"Erro com a configuração {trend}, {seasonal}, {period}, damped={damped}: {e}")
+    
+    
+    
+        modelo_treino = ExponentialSmoothing(
+            instalacao_mensal_df['consumo_dia'], 
+            trend=best_params['trend'],      
+            seasonal=best_params['seasonal'],   
+            seasonal_periods=best_params['seasonal_periods'],
+            damped_trend=best_params['damped_trend']  
+        )
+
+        ajuste_treino = modelo_treino.fit()
+
+        ## Visualização da previsão
+        st.subheader("Previsão de Consumo Mensal")
+        
+        months_to_predict = st.selectbox("Selecione o número de meses para prever:", range(1, 25))
+
+        ## Prever o consumo para o número de meses selecionado
+        previsao_mensal = ajuste_treino.forecast(months_to_predict)
+
+        if months_to_predict == 1:
+            st.write(f"Previsão de consumo para essa instalação para o próximo mês:")
+        else:
+            st.write(f"Previsão de consumo para essa instalação para os próximos {months_to_predict} meses:")
+        
+        previsao_df = pd.DataFrame({
+            'Ano/Mês': previsao_mensal.index,
+            'Previsão (m³)': previsao_mensal.values
+        })
+        
+        previsao_df['Ano/Mês'] = previsao_df['Ano/Mês'].dt.strftime('%m/%Y')
+
+        st.write("Tabela de Previsão de Consumo:")
+        st.dataframe(previsao_df)
+
+        df_grafico = pd.concat([
+            instalacao_mensal_df.reset_index(),  # Dados reais
+            pd.DataFrame({'ano_mes': previsao_mensal.index, 'consumo_dia': previsao_mensal.values})  # Dados previstos
+        ])
+
+        df_grafico['tipo'] = ['Real' if i < len(instalacao_mensal_df) else 'Previsão' for i in range(len(df_grafico))]
+
+        fig_previsao = px.line(
+            df_grafico, 
+            x='ano_mes', 
+            y='consumo_dia', 
+            color='tipo', 
+            title=f'Previsão de Consumo para os próximos {months_to_predict} meses' if months_to_predict > 1 else 'Previsão de Consumo para o próximo mês',
+            labels={'ano_mes': 'Ano/Mês', 'consumo_dia': 'Consumo (m³)'},
+        )
+
+        ## Real (vermelho) e previsão (verde)
+        fig_previsao.update_traces(
+            line=dict(color='red'),  ## Para dados reais
+            selector=dict(name='Real')
+        )
+
+        fig_previsao.update_traces(
+            line=dict(color='green'),  #R Para dados de previsão
+            selector=dict(name='Previsão'),
+        )
+        
+        if months_to_predict != 1:
+            st.plotly_chart(fig_previsao)
+                        
+
+
+
+
+        
